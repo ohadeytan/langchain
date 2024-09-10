@@ -8,7 +8,6 @@ import numpy as np
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
-
 from langchain_milvus.utils.sparse import BaseSparseEmbedding
 
 logger = logging.getLogger(__name__)
@@ -301,8 +300,18 @@ class Milvus(VectorStore):
         self._primary_field = primary_field
         # In order for compatibility, the text field will need to be called "text"
         self._text_field = text_field
+
+        if isinstance(self.embedding_func, list) and not isinstance(vector_field, list):
+            logger.error(
+                "When multiple embeddings function are used, one must provide"
+                "matching `vector_field` names."
+            )
+            raise ValueError(
+                "Multiple embeddings function provided without matching `vector_field` names."
+            )
         # In order for compatibility, the vector field needs to be called "vector"
         self._vector_field = vector_field
+
         if metadata_field:
             logger.warning(
                 "DeprecationWarning: `metadata_field` is about to be deprecated, "
@@ -343,6 +352,7 @@ class Milvus(VectorStore):
             self.col = None
 
         # Initialize the vector store
+        self._hybrid_retriever = None
         self._init(
             partition_names=partition_names,
             replica_number=replica_number,
@@ -415,6 +425,10 @@ class Milvus(VectorStore):
     @staticmethod
     def _is_sparse_embedding(embeddings_function: EmbeddingType) -> bool:
         return isinstance(embeddings_function, BaseSparseEmbedding)
+
+    @property
+    def _is_hybrid(self) -> bool:
+        return isinstance(self.embeddings, list)
 
     def _init(
         self,
@@ -553,28 +567,36 @@ class Milvus(VectorStore):
                     max_length=65_535,
                 )
             )
-        embeddings = embeddings if isinstance(embeddings[0][0], list) else [embeddings]
-        embeddings_functions = (
-            self.embeddings if isinstance(self.embeddings, list) else [self.embeddings]
-        )
-        vector_fields = (
-            self._vector_field
-            if isinstance(self._vector_field, list)
-            else [self._vector_field]
-        )
-        for i, vectors in enumerate(embeddings):
-            dim = len(vectors[0])
+
+        if not self._is_hybrid:
+            dim = len(embeddings[0])
             # Create the vector field, supports binary or float vectors
-            if self._is_sparse_embedding(embeddings_function=embeddings_functions[i]):
+            if self._is_sparse_embedding(embeddings_function=self.embeddings):
                 fields.append(
-                    FieldSchema(vector_fields[i], DataType.SPARSE_FLOAT_VECTOR)
+                    FieldSchema(self._vector_field, DataType.SPARSE_FLOAT_VECTOR)
                 )
             else:
                 fields.append(
                     FieldSchema(
-                        vector_fields[i], infer_dtype_bydata(vectors[0]), dim=dim
+                        self._vector_field, infer_dtype_bydata(embeddings[0]), dim=dim
                     )
                 )
+        else:
+            for i, vectors in enumerate(embeddings):
+                dim = len(vectors[0])
+                # Create the vector field, supports binary or float vectors
+                if self._is_sparse_embedding(embeddings_function=self.embeddings[i]):
+                    fields.append(
+                        FieldSchema(self._vector_field[i], DataType.SPARSE_FLOAT_VECTOR)
+                    )
+                else:
+                    fields.append(
+                        FieldSchema(
+                            self._vector_field[i],
+                            infer_dtype_bydata(vectors[0]),
+                            dim=dim,
+                        )
+                    )
 
         # Create the schema for the collection
         schema = CollectionSchema(
@@ -658,8 +680,24 @@ class Milvus(VectorStore):
             "params": {},
         }
 
+        def create_index_helper(vector_field: str, index_params: dict) -> None:
+            try:
+                self.col.create_index(
+                    vector_field,
+                    index_params=index_params,
+                    using=self.alias,
+                )
+            except MilvusException:
+                # Use AUTOINDEX if default index creation fails (e.g., on Zilliz Cloud)
+                index_params = default_auto_index_params
+                self.col.create_index(
+                    vector_field,
+                    index_params=index_params,
+                    using=self.alias,
+                )
+
         if isinstance(self.col, Collection) and not self._get_index():
-            if not isinstance(self.embeddings, list):
+            if not self._is_hybrid:
                 try:
                     # If no index params, use a default HNSW based one
                     if self.index_params is None:
@@ -667,35 +705,18 @@ class Milvus(VectorStore):
                             self.index_params = default_sparse_index_params
                         else:
                             self.index_params = default_dense_index_params
-
-                    try:
-                        self.col.create_index(
-                            self._vector_field,
-                            index_params=self.index_params,
-                            using=self.alias,
-                        )
-
-                    # If default did not work, most likely on Zilliz Cloud
-                    except MilvusException:
-                        # Use AUTOINDEX based index
-                        self.index_params = default_auto_index_params
-                        self.col.create_index(
-                            self._vector_field,
-                            index_params=self.index_params,
-                            using=self.alias,
-                        )
+                    create_index_helper(self._vector_field, self.index_params)
                     logger.debug(
                         "Successfully created an index on collection: %s",
                         self.collection_name,
                     )
-
                 except MilvusException as e:
                     logger.error(
                         "Failed to create an index on collection: %s",
                         self.collection_name,
                     )
                     raise e
-            else:  # self.embeddings is a list
+            else:  # is hybrid
                 for i, embeddings_func in self.embeddings:
                     if self.index_params is None:
                         self.index_params = [None for _ in self.embeddings]
@@ -707,28 +728,14 @@ class Milvus(VectorStore):
                                     self.index_params[i] = default_sparse_index_params
                                 else:
                                     self.index_params[i] = default_dense_index_params
-
-                            try:
-                                self.col.create_index(
-                                    self._vector_field[i],
-                                    index_params=self.index_params[i],
-                                    using=self.alias,
-                                )
-
-                            # If default did not work, most likely on Zilliz Cloud
-                            except MilvusException:
-                                # Use AUTOINDEX based index
-                                self.index_params[i] = default_auto_index_params
-                                self.col.create_index(
-                                    self._vector_field[i],
-                                    index_params=self.index_params[i],
-                                    using=self.alias,
-                                )
+                            create_index_helper(
+                                self._vector_field[i], self.index_params[i]
+                            )
                             logger.debug(
-                                "Successfully created an index on collection: %s",
+                                "Successfully created an index on %s field on collection: %s",
+                                self._vector_field[i],
                                 self.collection_name,
                             )
-
                         except MilvusException as e:
                             logger.error(
                                 "Failed to create an index on collection: %s",
