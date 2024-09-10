@@ -3,8 +3,8 @@
 from typing import Any, List, Optional
 
 import pytest
-from langchain_core.documents import Document
 
+from langchain_core.documents import Document
 from langchain_milvus.utils.sparse import BM25SparseEmbedding
 from langchain_milvus.vectorstores import Milvus
 from tests.integration_tests.utils import (
@@ -12,6 +12,7 @@ from tests.integration_tests.utils import (
     assert_docs_equal_without_pk,
     fake_texts,
 )
+
 
 #
 # To run this test properly, please start a Milvus server with the following command:
@@ -375,6 +376,40 @@ def test_milvus_array_field() -> None:
     assert len(output) == 2
 
 
+def test_milvus_hybrid_embeddings() -> None:
+    texts = [
+        "hot is a television broadcaster in israel working day and night",
+        "the sun is the source of most warming on earth, hence in the morning the temperature is higher than"
+        "in the evening"
+    ]
+    query = "why it is hot during the day while it is cold during the night?"
+    sparse_embedding_func = BM25SparseEmbedding(corpus=texts)
+
+    from milvus_model.dense import SentenceTransformerEmbeddingFunction
+    dense_embedding_func = SentenceTransformerEmbeddingFunction(
+        model_name='all-MiniLM-L6-v2', device='cpu'
+    )
+    docsearch = Milvus.from_texts(
+        embedding=[sparse_embedding_func, dense_embedding_func],
+        texts=texts,
+        connection_args={"uri": "./milvus_demo.db"},
+        drop_old=True,
+        weights=[0, 1]
+    )
+    output = docsearch.similarity_search(query=query, k=1)
+    assert texts[0] in output[0].page_content
+
+    docsearch = Milvus.from_texts(
+        embedding=[sparse_embedding_func, dense_embedding_func],
+        texts=texts,
+        connection_args={"uri": "./milvus_demo.db"},
+        drop_old=True,
+        weights=[1, 0]
+    )
+    output = docsearch.similarity_search(query=query, k=1)
+    assert texts[1] in output[0].page_content
+
+
 # if __name__ == "__main__":
 #     test_milvus()
 #     test_milvus_vector_search()
@@ -394,3 +429,4 @@ def test_milvus_array_field() -> None:
 #     test_milvus_enable_dynamic_field_with_partition_key()
 #     test_milvus_sparse_embeddings()
 #     test_milvus_array_field()
+#     test_milvus_hybrid_embeddings()
