@@ -384,8 +384,6 @@ def test_milvus_hybrid_embeddings() -> None:
     query = "why it is hot during the day while it is cold during the night?"
     sparse_embedding_func = BM25SparseEmbedding(corpus=texts)
 
-    from milvus_model.dense import SentenceTransformerEmbeddingFunction
-
     dense_embedding_func = FakeEmbeddings()
     fake_embeddings_func = FakeEmbeddings()
     docsearch = Milvus.from_texts(
