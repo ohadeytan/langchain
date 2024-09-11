@@ -3,8 +3,8 @@
 from typing import Any, List, Optional
 
 import pytest
-
 from langchain_core.documents import Document
+
 from langchain_milvus.utils.sparse import BM25SparseEmbedding
 from langchain_milvus.vectorstores import Milvus
 from tests.integration_tests.utils import (
@@ -12,7 +12,6 @@ from tests.integration_tests.utils import (
     assert_docs_equal_without_pk,
     fake_texts,
 )
-
 
 #
 # To run this test properly, please start a Milvus server with the following command:
@@ -380,31 +379,31 @@ def test_milvus_hybrid_embeddings() -> None:
     texts = [
         "hot is a television broadcaster in israel working day and night",
         "the sun is the source of most warming on earth, hence in the morning the temperature is higher than"
-        "in the evening"
+        "in the evening",
     ]
     query = "why it is hot during the day while it is cold during the night?"
     sparse_embedding_func = BM25SparseEmbedding(corpus=texts)
 
     from milvus_model.dense import SentenceTransformerEmbeddingFunction
-    dense_embedding_func = SentenceTransformerEmbeddingFunction(
-        model_name='all-MiniLM-L6-v2', device='cpu'
-    )
+
+    dense_embedding_func = FakeEmbeddings()
+    fake_embeddings_func = FakeEmbeddings()
     docsearch = Milvus.from_texts(
-        embedding=[sparse_embedding_func, dense_embedding_func],
+        embedding=[sparse_embedding_func, dense_embedding_func, fake_embeddings_func],
         texts=texts,
         connection_args={"uri": "./milvus_demo.db"},
         drop_old=True,
-        weights=[0, 1]
+        weights=[0, 1, 0],
     )
     output = docsearch.similarity_search(query=query, k=1)
     assert texts[0] in output[0].page_content
 
     docsearch = Milvus.from_texts(
-        embedding=[sparse_embedding_func, dense_embedding_func],
+        embedding=[sparse_embedding_func, dense_embedding_func, fake_embeddings_func],
         texts=texts,
         connection_args={"uri": "./milvus_demo.db"},
         drop_old=True,
-        weights=[1, 0]
+        weights=[1, 0, 0],
     )
     output = docsearch.similarity_search(query=query, k=1)
     assert texts[1] in output[0].page_content
