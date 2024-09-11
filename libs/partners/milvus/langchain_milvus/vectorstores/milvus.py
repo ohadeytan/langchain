@@ -304,14 +304,16 @@ class Milvus(VectorStore):
         self._text_field = text_field
 
         if isinstance(self.embedding_func, list) and not isinstance(vector_field, list):
-            logger.warning(
-                "When multiple embeddings function are used, one should provide"
-                "matching `vector_field` names. Using generated vector names."
-            )
-            self._vector_field = [
+            vectors_field_names = [
                 f"vector_{i+1}_{e.__class__.__name__}"
                 for i, e in enumerate(embedding_function)
             ]
+            logger.warning(
+                "When multiple embeddings function are used, one should provide"
+                "matching `vector_field` names. Using generated vector names %s",
+                vectors_field_names,
+            )
+            self._vector_field = vectors_field_names
         else:
             # In order for compatibility, the vector field needs to be called "vector"
             self._vector_field = vector_field
@@ -574,35 +576,28 @@ class Milvus(VectorStore):
                 )
             )
 
-        if not self._is_hybrid:
-            dim = len(embeddings[0])
+        embeddings_functions = (
+            [self.embeddings] if not self._is_hybrid else self.embeddings
+        )
+        vector_fields = (
+            [self._vector_field] if not self._is_hybrid else self._vector_field
+        )
+        embeddings = [embeddings] if not self._is_hybrid else embeddings
+        for i, vectors in enumerate(embeddings):
+            dim = len(vectors[0])
             # Create the vector field, supports binary or float vectors
-            if self._is_sparse_embedding(embeddings_function=self.embeddings):
+            if self._is_sparse_embedding(embeddings_function=embeddings_functions[i]):
                 fields.append(
-                    FieldSchema(self._vector_field, DataType.SPARSE_FLOAT_VECTOR)
+                    FieldSchema(vector_fields[i], DataType.SPARSE_FLOAT_VECTOR)
                 )
             else:
                 fields.append(
                     FieldSchema(
-                        self._vector_field, infer_dtype_bydata(embeddings[0]), dim=dim
+                        vector_fields[i],
+                        infer_dtype_bydata(vectors[0]),
+                        dim=dim,
                     )
                 )
-        else:
-            for i, vectors in enumerate(embeddings):
-                dim = len(vectors[0])
-                # Create the vector field, supports binary or float vectors
-                if self._is_sparse_embedding(embeddings_function=self.embeddings[i]):
-                    fields.append(
-                        FieldSchema(self._vector_field[i], DataType.SPARSE_FLOAT_VECTOR)
-                    )
-                else:
-                    fields.append(
-                        FieldSchema(
-                            self._vector_field[i],
-                            infer_dtype_bydata(vectors[0]),
-                            dim=dim,
-                        )
-                    )
 
         # Create the schema for the collection
         schema = CollectionSchema(
@@ -700,18 +695,34 @@ class Milvus(VectorStore):
                 )
 
         if isinstance(self.col, Collection):
-            if not self._is_hybrid:
-                if not self._get_index():
+            embeddings_functions: List[EmbeddingType] = (
+                [self.embeddings] if not self._is_hybrid else self.embeddings
+            )
+            vector_fields: List[str] = (
+                [self._vector_field] if not self._is_hybrid else self._vector_field
+            )
+            if self.index_params is None:
+                indexes_params = [None for _ in range(len(embeddings_functions))]
+            else:
+                indexes_params = (
+                    [self.index_params] if not self._is_hybrid else self.index_params
+                )
+
+            for i, embeddings_func in enumerate(embeddings_functions):
+                if isinstance(self.col, Collection) and not self._get_index(
+                    vector_fields[i]
+                ):
                     try:
                         # If no index params, use a default HNSW based one
-                        if self.index_params is None:
-                            if self._is_sparse_embedding:
-                                self.index_params = default_sparse_index_params
+                        if indexes_params[i] is None:
+                            if self._is_sparse_embedding(embeddings_func):
+                                indexes_params[i] = default_sparse_index_params
                             else:
-                                self.index_params = default_dense_index_params
-                        create_index_helper(self._vector_field, self.index_params)
+                                indexes_params[i] = default_dense_index_params
+                        create_index_helper(vector_fields[i], indexes_params[i])
                         logger.debug(
-                            "Successfully created an index on collection: %s",
+                            "Successfully created an index on %s field on collection: %s",
+                            vector_fields[i],
                             self.collection_name,
                         )
                     except MilvusException as e:
@@ -720,57 +731,33 @@ class Milvus(VectorStore):
                             self.collection_name,
                         )
                         raise e
-            else:  # is hybrid
-                if self.index_params is None:
-                    self.index_params = [None for _ in self.embeddings]
-                for i, embeddings_func in enumerate(self.embeddings):
-                    if isinstance(self.col, Collection) and not self._get_index(
-                        self._vector_field[i]
-                    ):
-                        try:
-                            # If no index params, use a default HNSW based one
-                            if self.index_params[i] is None:
-                                if self._is_sparse_embedding(embeddings_func):
-                                    self.index_params[i] = default_sparse_index_params
-                                else:
-                                    self.index_params[i] = default_dense_index_params
-                            create_index_helper(
-                                self._vector_field[i], self.index_params[i]
-                            )
-                            logger.debug(
-                                "Successfully created an index on %s field on collection: %s",
-                                self._vector_field[i],
-                                self.collection_name,
-                            )
-                        except MilvusException as e:
-                            logger.error(
-                                "Failed to create an index on collection: %s",
-                                self.collection_name,
-                            )
-                            raise e
+            if not self._is_hybrid:
+                self.index_params = indexes_params
+            else:
+                self.index_params = indexes_params[0]
 
     def _create_search_params(self) -> None:
         """Generate search params based on the current index type"""
         from pymilvus import Collection
 
         if isinstance(self.col, Collection) and not self.search_params:
-            if not self._is_hybrid:
-                index = self._get_index()
-                if index:
-                    if not isinstance(index, list):
-                        index_type: str = index["index_param"]["index_type"]
-                        metric_type: str = index["index_param"]["metric_type"]
-                        self.search_params = self.default_search_params[index_type]
-                        self.search_params["metric_type"] = metric_type
+            vector_fields: List[str] = (
+                [self._vector_field] if not self._is_hybrid else self._vector_field
+            )
+            search_params_list: List[dict] = []
+
+            for vector_field in vector_fields:
+                index = self._get_index(field_name=vector_field)
+                index_type: str = index["index_param"]["index_type"]
+                metric_type: str = index["index_param"]["metric_type"]
+                search_params = self.default_search_params[index_type]
+                search_params["metric_type"] = metric_type
+                search_params_list.append(search_params)
+
+            if self._is_hybrid:
+                self.search_params = search_params_list
             else:
-                search_params_list = []
-                for vector_field in self._vector_field:
-                    index = self._get_index(field_name=vector_field)
-                    index_type: str = index["index_param"]["index_type"]
-                    metric_type: str = index["index_param"]["metric_type"]
-                    search_params = self.default_search_params[index_type]
-                    search_params["metric_type"] = metric_type
-                    search_params_list.append(search_params)
+                self.search_params = search_params_list[0]
 
     def _load(
         self,
