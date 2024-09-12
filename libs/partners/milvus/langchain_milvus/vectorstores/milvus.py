@@ -118,8 +118,8 @@ class Milvus(VectorStore):
             Name of the collection.
         collection_description: str
             Description of the collection.
-        embedding_function: Union[Embeddings, BaseSparseEmbedding]
-            Embedding function to use.
+        embedding_function: Union[EmbeddingType, List[EmbeddingType]]
+            Embedding function(s) to use.
 
     Key init args — client params:
         connection_args: Optional[dict]
@@ -223,6 +223,26 @@ class Milvus(VectorStore):
 
             [Document(metadata={'baz': 'baz', 'pk': '2'}, page_content='thud')]
 
+    Multi-vector search:
+            .. code-block:: python
+
+            from langchain_milvus import Milvus
+            from langchain_openai import OpenAIEmbeddings
+            from langchain_milvus.utils.sparse import BM25SparseEmbedding
+
+            URI = "./milvus_example.db"
+
+            texts = ["a", "b", "c"]
+            vector_store = Milvus.from_texts(
+                embedding=[OpenAIEmbeddings(), BM25SparseEmbedding(corpus=texts)],
+                connection_args={"uri": URI},
+            )
+            vector_store.similarity_search(
+                query="a",
+                ranker_type="weighted",
+                ranker_params={"weights": [1.0, 0.0]},
+                k=1,
+            )
     """  # noqa: E501
 
     def __init__(
