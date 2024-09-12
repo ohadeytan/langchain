@@ -740,6 +740,8 @@ class Milvus(VectorStore):
 
     def _create_search_params(self) -> None:
         """Generate search params based on the current index type"""
+        import copy
+
         from pymilvus import Collection
 
         if isinstance(self.col, Collection) and not self.search_params:
@@ -752,7 +754,7 @@ class Milvus(VectorStore):
                 index = self._get_index(field_name=vector_field)
                 index_type: str = index["index_param"]["index_type"]
                 metric_type: str = index["index_param"]["metric_type"]
-                search_params = self.default_search_params[index_type]
+                search_params = copy.deepcopy(self.default_search_params[index_type])
                 search_params["metric_type"] = metric_type
                 search_params_list.append(search_params)
 
