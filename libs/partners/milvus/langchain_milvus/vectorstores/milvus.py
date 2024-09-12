@@ -328,7 +328,7 @@ class Milvus(VectorStore):
         if isinstance(self.embedding_func, list) and not isinstance(vector_field, list):
             vectors_field_names = [
                 f"vector_{i+1}_{e.__class__.__name__}"
-                for i, e in enumerate(embedding_function)
+                for i, e in enumerate(self.embedding_func)
             ]
             logger.warning(
                 "When multiple embeddings function are used, one should provide"
@@ -515,7 +515,7 @@ class Milvus(VectorStore):
             # Determine metadata schema
             if metadatas:
                 # Create FieldSchema for each entry in metadata.
-                vector_fields = (
+                vector_fields: List[str] = (
                     self._vector_field
                     if isinstance(self._vector_field, list)
                     else [self._vector_field]
@@ -596,10 +596,10 @@ class Milvus(VectorStore):
                 )
             )
 
-        embeddings_functions = (
+        embeddings_functions: List[EmbeddingType] = (
             [self.embeddings] if not self._is_hybrid else self.embeddings
         )
-        vector_fields = (
+        vector_fields: List[str] = (
             [self._vector_field] if not self._is_hybrid else self._vector_field
         )
         embeddings = [embeddings] if not self._is_hybrid else embeddings
@@ -670,7 +670,7 @@ class Milvus(VectorStore):
         """Return the vector index information if it exists"""
         from pymilvus import Collection
 
-        field_name = field_name or self._vector_field
+        field_name: str = field_name or self._vector_field
 
         if isinstance(self.col, Collection):
             for x in self.col.indexes:
@@ -722,9 +722,11 @@ class Milvus(VectorStore):
                 [self._vector_field] if not self._is_hybrid else self._vector_field
             )
             if self.index_params is None:
-                indexes_params = [None for _ in range(len(embeddings_functions))]
+                indexes_params: List[dict] = [
+                    None for _ in range(len(embeddings_functions))
+                ]
             else:
-                indexes_params = (
+                indexes_params: List[dict] = (
                     [self.index_params] if not self._is_hybrid else self.index_params
                 )
 
@@ -741,7 +743,8 @@ class Milvus(VectorStore):
                                 indexes_params[i] = default_dense_index_params
                         create_index_helper(vector_fields[i], indexes_params[i])
                         logger.debug(
-                            "Successfully created an index on %s field on collection: %s",
+                            "Successfully created an index"
+                            "on %s field on collection: %s",
                             vector_fields[i],
                             self.collection_name,
                         )
@@ -867,12 +870,15 @@ class Milvus(VectorStore):
 
         if not self._is_hybrid:
             try:
-                embeddings: list = self.embedding_func.embed_documents(texts)
+                embeddings: List[list] = self.embedding_func.embed_documents(texts)
             except NotImplementedError:
-                embeddings = [self.embedding_func.embed_query(x) for x in texts]
+                embeddings: List[list] = [
+                    self.embedding_func.embed_query(x) for x in texts
+                ]
         else:
             embeddings: List[list] = []
-            for embedding_func in self.embedding_func:
+            embeddings_functions: List[EmbeddingType] = self.embedding_func
+            for embedding_func in embeddings_functions:
                 try:
                     embeddings.append(embedding_func.embed_documents(texts))
                 except NotImplementedError:
@@ -1532,7 +1538,8 @@ class Milvus(VectorStore):
                 return RRFRanker()
             case _:
                 logger.error(
-                    "Ranker %s does not exist. Please use on of the following rankers: %s, %s",
+                    "Ranker %s does not exist. "
+                    "Please use on of the following rankers: %s, %s",
                     ranker_type,
                     "weighted",
                     "rrf",
