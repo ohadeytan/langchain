@@ -320,17 +320,18 @@ class Milvus(VectorStore):
         # In order for compatibility, the text field will need to be called "text"
         self._text_field = text_field
 
-        if isinstance(self.embedding_func, list) and not isinstance(vector_field, list):
-            vectors_field_names = [
-                f"vector_{i+1}_{e.__class__.__name__}"
-                for i, e in enumerate(self.embedding_func)
-            ]
-            logger.warning(
-                "When multiple embeddings function are used, one should provide"
-                "matching `vector_field` names. Using generated vector names %s",
-                vectors_field_names,
-            )
-            self._vector_field = vectors_field_names
+        if isinstance(self.embedding_func, list):
+            if not isinstance(vector_field, list):
+                vectors_field_names = [
+                    f"vector_{i+1}_{e.__class__.__name__}"
+                    for i, e in enumerate(self.embedding_func)
+                ]
+                logger.warning(
+                    "When multiple embeddings function are used, one should provide"
+                    "matching `vector_field` names. Using generated vector names %s",
+                    vectors_field_names,
+                )
+                self._vector_field = vectors_field_names
         else:
             # In order for compatibility, the vector field needs to be called "vector"
             self._vector_field = vector_field
@@ -850,13 +851,11 @@ class Milvus(VectorStore):
 
         if not self._is_hybrid:
             try:
-                embeddings: List[list] = self.embedding_func.embed_documents(texts)
+                embeddings = self.embedding_func.embed_documents(texts)
             except NotImplementedError:
-                embeddings: List[list] = [
-                    self.embedding_func.embed_query(x) for x in texts
-                ]
+                embeddings = [self.embedding_func.embed_query(x) for x in texts]
         else:
-            embeddings: List[list] = []
+            embeddings = []
             embeddings_functions: List[EmbeddingType] = self.embedding_func
             for embedding_func in embeddings_functions:
                 try:
@@ -1110,7 +1109,7 @@ class Milvus(VectorStore):
 
         if self._is_hybrid:
             ranker = self._create_ranker(
-                kwargs.pop("ranker_type", None), kwargs.pop("ranker_params", None)
+                kwargs.pop("ranker_type", None), kwargs.pop("ranker_params", {})
             )
             hybrid_retriever = MilvusCollectionHybridSearchRetriever(
                 collection=self.col,
@@ -1499,10 +1498,13 @@ class Milvus(VectorStore):
     def _create_ranker(
         self,
         ranker_type: Optional[Literal["rrf", "weighted"]],
-        ranker_params: Optional[dict],
+        ranker_params: dict,
     ) -> BaseRanker:
         """A Ranker factory method"""
-        default_weights = [1.0] * len(self.embeddings)
+        embeddings_functions: List[EmbeddingType] = (
+            self.embeddings if self._is_hybrid else [self.embeddings]
+        )
+        default_weights = [1.0] * len(embeddings_functions)
         if not ranker_type:
             return WeightedRanker(*default_weights)
 
@@ -1526,4 +1528,8 @@ class Milvus(VectorStore):
                 raise ValueError("Unrecognized ranker of type %s", ranker_type)
 
     def _get_vector_fields_as_list(self) -> list[str]:
-        return [self._vector_field] if not self._is_hybrid else self._vector_field
+        return (
+            [self._vector_field]
+            if not isinstance(self._vector_field, list)
+            else self._vector_field
+        )
