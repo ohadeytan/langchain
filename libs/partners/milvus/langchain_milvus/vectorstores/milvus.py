@@ -374,7 +374,6 @@ class Milvus(VectorStore):
             self.col.drop()
             self.col = None
 
-        self._hybrid_retriever = None
         # Initialize the vector store
         self._init(
             partition_names=partition_names,
