@@ -1029,13 +1029,15 @@ class Milvus(VectorStore):
         Args:
             query (str): The text to search.
             k (int, optional): How many results to return. Defaults to 4.
-            param (dict, optional): The search params for the index type.
+            param (Union[List[dict], dict], optional): The search params for the index
+                type(s). Defaults to None.
+            expr (str, Union[List[str]], str): Filtering expression(s).
                 Defaults to None.
-            expr (str, optional): Filtering expression. Defaults to None.
             timeout (int, optional): How long to wait before timeout error.
                 Defaults to None.
             kwargs: Collection.search() keyword arguments.
-                    Or "ranker_type" and "ranker_params" for controlling hybrid search (if available).
+                Additionally, "ranker_type" and "ranker_params"
+                for controlling hybrid search (if available).
 
         Returns:
             List[Document]: Document results for search.
@@ -1100,13 +1102,15 @@ class Milvus(VectorStore):
         Args:
             query (str): The text being searched.
             k (int, optional): The amount of results to return. Defaults to 4.
-            param (dict): The search params for the specified index.
+            param (Union[List[dict], dict], optional): The search params
+                for the index type(s). Defaults to None.
+            expr (str, Union[List[str]], str): Filtering expression(s).
                 Defaults to None.
-            expr (str, optional): Filtering expression. Defaults to None.
             timeout (float, optional): How long to wait before timeout error.
                 Defaults to None.
             kwargs: Collection.search() keyword arguments.
-                    Or "ranker_type" and "ranker_params" for controlling hybrid search (if available).
+                    Additionally, "ranker_type" and "ranker_params"
+                    for controlling hybrid search (if available).
 
         Returns:
             List[float], List[Tuple[Document, any, any]]:
