@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 
 import numpy as np
@@ -9,6 +9,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 from pymilvus import WeightedRanker
+from pymilvus.client.abstract import BaseRanker, RRFRanker
 
 from langchain_milvus import MilvusCollectionHybridSearchRetriever
 from langchain_milvus.utils.sparse import BaseSparseEmbedding
@@ -248,7 +249,6 @@ class Milvus(VectorStore):
         timeout: Optional[float] = None,
         num_shards: Optional[int] = None,
         metadata_schema: Optional[dict[str, Any]] = None,
-        weights: Optional[List[float]] = None,
     ):
         """Initialize the Milvus vector store."""
         try:
@@ -319,8 +319,6 @@ class Milvus(VectorStore):
         else:
             # In order for compatibility, the vector field needs to be called "vector"
             self._vector_field = vector_field
-
-        self.weights = weights
 
         if metadata_field:
             logger.warning(
@@ -1017,6 +1015,7 @@ class Milvus(VectorStore):
             timeout (int, optional): How long to wait before timeout error.
                 Defaults to None.
             kwargs: Collection.search() keyword arguments.
+                    Or "ranker_type" and "ranker_params" for controlling hybrid search (if available).
 
         Returns:
             List[Document]: Document results for search.
@@ -1067,8 +1066,8 @@ class Milvus(VectorStore):
         self,
         query: str,
         k: int = 4,
-        param: Optional[dict] = None,
-        expr: Optional[str] = None,
+        param: Optional[Union[List[dict], dict]] = None,
+        expr: Optional[Union[List[str]], str] = None,
         timeout: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Tuple[Document, float]]:
@@ -1087,6 +1086,7 @@ class Milvus(VectorStore):
             timeout (float, optional): How long to wait before timeout error.
                 Defaults to None.
             kwargs: Collection.search() keyword arguments.
+                    Or "ranker_type" and "ranker_params" for controlling hybrid search (if available).
 
         Returns:
             List[float], List[Tuple[Document, any, any]]:
@@ -1099,9 +1099,12 @@ class Milvus(VectorStore):
         timeout = self.timeout or timeout
 
         if self._is_hybrid:
+            ranker = self._create_ranker(
+                kwargs.pop("ranker_type", None), kwargs.pop("ranker_params", None)
+            )
             hybrid_retriever = MilvusCollectionHybridSearchRetriever(
                 collection=self.col,
-                rerank=WeightedRanker(*[1.0] * len(self.embeddings)),
+                rerank=ranker,
                 anns_fields=self._vector_field,
                 field_embeddings=self.embeddings,
                 field_search_params=param or self.search_params,
@@ -1484,3 +1487,30 @@ class Milvus(VectorStore):
                 "Failed to upsert entities: %s error: %s", self.collection_name, exc
             )
             raise exc
+
+    def _create_ranker(
+        self,
+        ranker_type: Optional[Literal["rrf", "weighted"]],
+        ranker_params: Optional[dict],
+    ) -> BaseRanker:
+        """A Ranker factory method"""
+        default_weights = [1.0] * len(self.embeddings)
+        if not ranker_type:
+            return WeightedRanker(*default_weights)
+        match ranker_type:
+            case "weighted":
+                weights = ranker_params.get("weights", default_weights)
+                return WeightedRanker(*weights)
+            case "rrf":
+                k = ranker_params.get("k", None)
+                if k:
+                    return RRFRanker(k)
+                return RRFRanker()
+            case _:
+                logger.error(
+                    "Ranker %s does not exist. Please use on of the following rankers: %s, %s",
+                    ranker_type,
+                    "weighted",
+                    "rrf",
+                )
+                raise ValueError("Unrecognized ranker %s", ranker_type)
