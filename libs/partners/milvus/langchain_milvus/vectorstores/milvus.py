@@ -486,6 +486,7 @@ class Milvus(VectorStore):
         from pymilvus.orm.types import infer_dtype_bydata  # type: ignore
 
         fields = []
+        vector_fields: List[str] = self._get_vector_fields_as_list()
         # If enable_dynamic_field, we don't need to create fields, and just pass it.
         # In the future, when metadata_field is deprecated,
         # This logical structure will be simplified like this:
@@ -509,11 +510,6 @@ class Milvus(VectorStore):
             # Determine metadata schema
             if metadatas:
                 # Create FieldSchema for each entry in metadata.
-                vector_fields: List[str] = (
-                    self._vector_field
-                    if isinstance(self._vector_field, list)
-                    else [self._vector_field]
-                )
                 for key, value in metadatas[0].items():
                     if key in [self._primary_field, self._text_field] + vector_fields:
                         logger.error(
@@ -593,10 +589,7 @@ class Milvus(VectorStore):
         embeddings_functions: List[EmbeddingType] = (
             [self.embeddings] if not self._is_hybrid else self.embeddings
         )
-        vector_fields: List[str] = (
-            [self._vector_field] if not self._is_hybrid else self._vector_field
-        )
-        embeddings = [embeddings] if not self._is_hybrid else embeddings
+        embeddings: List[list] = [embeddings] if not self._is_hybrid else embeddings
         for i, vectors in enumerate(embeddings):
             dim = len(vectors[0])
             # Create the vector field, supports binary or float vectors
@@ -712,9 +705,7 @@ class Milvus(VectorStore):
             embeddings_functions: List[EmbeddingType] = (
                 [self.embeddings] if not self._is_hybrid else self.embeddings
             )
-            vector_fields: List[str] = (
-                [self._vector_field] if not self._is_hybrid else self._vector_field
-            )
+            vector_fields: List[str] = self._get_vector_fields_as_list()
             if self.index_params is None:
                 indexes_params: List[dict] = [
                     None for _ in range(len(embeddings_functions))
@@ -760,9 +751,7 @@ class Milvus(VectorStore):
         from pymilvus import Collection
 
         if isinstance(self.col, Collection) and not self.search_params:
-            vector_fields: List[str] = (
-                [self._vector_field] if not self._is_hybrid else self._vector_field
-            )
+            vector_fields: List[str] = self._get_vector_fields_as_list()
             search_params_list: List[dict] = []
 
             for vector_field in vector_fields:
@@ -1411,9 +1400,7 @@ class Milvus(VectorStore):
         return vector_db
 
     def _parse_document(self, data: dict) -> Document:
-        vector_fields = (
-            [self._vector_field] if not self._is_hybrid else self._vector_field
-        )
+        vector_fields: List[str] = self._get_vector_fields_as_list()
         for vector_field in vector_fields:
             if vector_field in data:
                 data.pop(vector_field)
@@ -1521,6 +1508,7 @@ class Milvus(VectorStore):
         default_weights = [1.0] * len(self.embeddings)
         if not ranker_type:
             return WeightedRanker(*default_weights)
+
         match ranker_type:
             case "weighted":
                 weights = ranker_params.get("weights", default_weights)
@@ -1538,4 +1526,7 @@ class Milvus(VectorStore):
                     "weighted",
                     "rrf",
                 )
-                raise ValueError("Unrecognized ranker %s", ranker_type)
+                raise ValueError("Unrecognized ranker of type %s", ranker_type)
+
+    def _get_vector_fields_as_list(self) -> list[str]:
+        return [self._vector_field] if not self._is_hybrid else self._vector_field
