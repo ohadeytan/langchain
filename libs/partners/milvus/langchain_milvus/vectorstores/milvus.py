@@ -225,12 +225,7 @@ class Milvus(VectorStore):
 
     Multi-vector search:
             .. code-block:: python
-
-            from langchain_milvus import Milvus
-            from langchain_openai import OpenAIEmbeddings
             from langchain_milvus.utils.sparse import BM25SparseEmbedding
-
-            URI = "./milvus_example.db"
 
             texts = ["a", "b", "c"]
             vector_store = Milvus.from_texts(
