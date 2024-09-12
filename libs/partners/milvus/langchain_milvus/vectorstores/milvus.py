@@ -8,7 +8,9 @@ import numpy as np
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
+from pymilvus import WeightedRanker
 
+from langchain_milvus import MilvusCollectionHybridSearchRetriever
 from langchain_milvus.utils.sparse import BaseSparseEmbedding
 
 logger = logging.getLogger(__name__)
@@ -359,8 +361,8 @@ class Milvus(VectorStore):
             self.col.drop()
             self.col = None
 
-        # Initialize the vector store
         self._hybrid_retriever = None
+        # Initialize the vector store
         self._init(
             partition_names=partition_names,
             replica_number=replica_number,
@@ -997,8 +999,8 @@ class Milvus(VectorStore):
         self,
         query: str,
         k: int = 4,
-        param: Optional[dict] = None,
-        expr: Optional[str] = None,
+        param: Optional[Union[List[dict], dict]] = None,
+        expr: Optional[Union[List[str]], str] = None,
         timeout: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Document]:
@@ -1092,11 +1094,37 @@ class Milvus(VectorStore):
             return []
 
         # Embed the query text.
-        embedding = self.embedding_func.embed_query(query)
         timeout = self.timeout or timeout
-        res = self.similarity_search_with_score_by_vector(
-            embedding=embedding, k=k, param=param, expr=expr, timeout=timeout, **kwargs
-        )
+
+        if self._is_hybrid:
+            hybrid_retriever = MilvusCollectionHybridSearchRetriever(
+                collection=self.col,
+                rerank=WeightedRanker(*[1.0] * len(self.embeddings)),
+                anns_fields=self._vector_field,
+                field_embeddings=self.embeddings,
+                field_search_params=param or self.search_params,
+                field_exprs=expr,
+                top_k=k,
+                text_field=self._text_field,
+                timeout=timeout,
+                **kwargs,
+            )
+            res = []
+            col_search_res = hybrid_retriever.hybrid_search(query)
+            for result in col_search_res[0]:
+                data = {x: result.entity.get(x) for x in result.entity.fields}
+                doc = self._parse_document(data)
+                res.append((doc, result.score))
+        else:
+            embedding = self.embedding_func.embed_query(query)
+            res = self.similarity_search_with_score_by_vector(
+                embedding=embedding,
+                k=k,
+                param=param,
+                expr=expr,
+                timeout=timeout,
+                **kwargs,
+            )
         return res
 
     def similarity_search_with_score_by_vector(
@@ -1354,8 +1382,12 @@ class Milvus(VectorStore):
         return vector_db
 
     def _parse_document(self, data: dict) -> Document:
-        if self._vector_field in data:
-            data.pop(self._vector_field)
+        vector_fields = (
+            [self._vector_field] if not self._is_hybrid else self._vector_field
+        )
+        for vector_field in vector_fields:
+            if vector_field in data:
+                data.pop(vector_field)
         return Document(
             page_content=data.pop(self._text_field),
             metadata=data.pop(self._metadata_field) if self._metadata_field else data,
