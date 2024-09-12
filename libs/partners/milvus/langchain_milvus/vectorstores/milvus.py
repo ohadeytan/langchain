@@ -651,13 +651,12 @@ class Milvus(VectorStore):
             for x in schema.fields:
                 self.fields.append(x.name)
 
-    def _get_index(
-        self, field_name: Optional[str] = None
-    ) -> Optional[Union[dict[str, Any], List[dict[str, Any]]]]:
+    def _get_index(self, field_name: Optional[str] = None) -> Optional[dict[str, Any]]:
         """Return the vector index information if it exists"""
         from pymilvus import Collection
 
-        field_name: str = field_name or self._vector_field
+        if not self._is_hybrid:
+            field_name: str = field_name or self._vector_field  # type: ignore
 
         if isinstance(self.col, Collection):
             for x in self.col.indexes:
@@ -669,23 +668,9 @@ class Milvus(VectorStore):
         """Create an index on the collection"""
         from pymilvus import Collection, MilvusException
 
-        default_sparse_index_params = {
-            "metric_type": "IP",
-            "index_type": "SPARSE_INVERTED_INDEX",
-            "params": {"drop_ratio_build": 0.2},
-        }
-        default_dense_index_params = {
-            "metric_type": "L2",
-            "index_type": "HNSW",
-            "params": {"M": 8, "efConstruction": 64},
-        }
-        default_auto_index_params = {
-            "metric_type": "L2",
-            "index_type": "AUTOINDEX",
-            "params": {},
-        }
-
-        def create_index_helper(vector_field: str, index_params: dict) -> None:
+        def create_index_helper(
+            vector_field: str, index_params: dict[str, Any]
+        ) -> None:
             try:
                 self.col.create_index(
                     vector_field,
@@ -694,7 +679,11 @@ class Milvus(VectorStore):
                 )
             except MilvusException:
                 # Use AUTOINDEX if default index creation fails (e.g., on Zilliz Cloud)
-                index_params = default_auto_index_params
+                index_params = {
+                    "metric_type": "L2",
+                    "index_type": "AUTOINDEX",
+                    "params": {},
+                }
                 self.col.create_index(
                     vector_field,
                     index_params=index_params,
@@ -707,11 +696,11 @@ class Milvus(VectorStore):
             )
             vector_fields: List[str] = self._get_vector_fields_as_list()
             if self.index_params is None:
-                indexes_params: List[dict] = [
+                indexes_params: List[Optional[dict]] = [
                     None for _ in range(len(embeddings_functions))
                 ]
             else:
-                indexes_params: List[dict] = (
+                indexes_params: List[Optional[dict]] = (
                     [self.index_params] if not self._is_hybrid else self.index_params
                 )
 
@@ -723,9 +712,17 @@ class Milvus(VectorStore):
                         # If no index params, use a default HNSW based one
                         if indexes_params[i] is None:
                             if self._is_sparse_embedding(embeddings_func):
-                                indexes_params[i] = default_sparse_index_params
+                                indexes_params[i] = {
+                                    "metric_type": "IP",
+                                    "index_type": "SPARSE_INVERTED_INDEX",
+                                    "params": {"drop_ratio_build": 0.2},
+                                }
                             else:
-                                indexes_params[i] = default_dense_index_params
+                                indexes_params[i] = {
+                                    "metric_type": "L2",
+                                    "index_type": "HNSW",
+                                    "params": {"M": 8, "efConstruction": 64},
+                                }
                         create_index_helper(vector_fields[i], indexes_params[i])
                         logger.debug(
                             "Successfully created an index"
@@ -909,7 +906,7 @@ class Milvus(VectorStore):
 
             if not self._is_hybrid:
                 entity_dict[self._vector_field] = embeddings[i]
-            else:
+            else:  # populate each vector field with the matching embeddings
                 for j, embedding in enumerate(embeddings):
                     entity_dict[self._vector_field[j]] = embedding[i]
 
