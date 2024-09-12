@@ -8,8 +8,8 @@ import numpy as np
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
-from pymilvus import WeightedRanker
-from pymilvus.client.abstract import BaseRanker, RRFRanker
+from pymilvus import RRFRanker, WeightedRanker
+from pymilvus.client.abstract import BaseRanker
 
 from langchain_milvus import MilvusCollectionHybridSearchRetriever
 from langchain_milvus.utils.sparse import BaseSparseEmbedding
