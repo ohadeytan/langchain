@@ -329,19 +329,18 @@ class Milvus(VectorStore):
                     f"Multi-vector search requires at least two embeddings functions."
                 )
             if not isinstance(vector_field, list):
-                vectors_field_names = [
+                vector_field = [
                     f"vector_{i+1}_{e.__class__.__name__}"
                     for i, e in enumerate(self.embedding_func)
                 ]
                 logger.warning(
                     "When multiple embeddings function are used, one should provide"
                     "matching `vector_field` names. Using generated vector names %s",
-                    vectors_field_names,
+                    vector_field,
                 )
-                self._vector_field = vectors_field_names
-        else:
-            # In order for compatibility, the vector field needs to be called "vector"
-            self._vector_field = vector_field
+
+        # In order for compatibility, the vector field needs to be called "vector"
+        self._vector_field = vector_field
 
         if metadata_field:
             logger.warning(
