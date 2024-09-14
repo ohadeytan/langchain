@@ -321,6 +321,13 @@ class Milvus(VectorStore):
         self._text_field = text_field
 
         if isinstance(self.embedding_func, list):
+            if len(self.embedding_func) < 2:
+                logger.error(
+                    "At least two embeddings functions are required for multi-vector search."
+                )
+                raise ValueError(
+                    f"Multi-vector search requires at least two embeddings functions."
+                )
             if not isinstance(vector_field, list):
                 vectors_field_names = [
                     f"vector_{i+1}_{e.__class__.__name__}"

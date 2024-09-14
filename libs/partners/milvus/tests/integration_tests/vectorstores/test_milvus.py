@@ -409,7 +409,7 @@ def test_milvus_multi_vector_embeddings() -> None:
     assert_docs_equal_without_pk(output, [Document(page_content=fake_texts[0])])
 
 
-def test_milvus_multi_vector_with_index_params():
+def test_milvus_multi_vector_with_index_params() -> None:
     """Test setting index params which are different from the defaults."""
     index_param_1 = {
         "metric_type": "COSINE",
@@ -440,7 +440,7 @@ def test_milvus_multi_vector_with_index_params():
     assert docsearch.search_params[1]["metric_type"] == "IP"
 
 
-def test_milvus_multi_vector_search_with_ranker():
+def test_milvus_multi_vector_search_with_ranker() -> None:
     """Test hybrid search with specified ranker"""
     from langchain_core.embeddings import Embeddings
 
@@ -484,6 +484,17 @@ def test_milvus_multi_vector_search_with_ranker():
         k=1,
     )
     assert_docs_equal_without_pk(output, [Document(page_content=fake_texts[-1])])
+
+
+def test_milvus_multi_vector_with_single_embeddings_raises_exception() -> None:
+    with pytest.raises(ValueError) as exception:
+        _ = Milvus.from_texts(
+            embedding=[FakeEmbeddings()],
+            texts=fake_texts,
+            connection_args={"uri": "./milvus_demo.db"},
+            drop_old=True,
+        )
+    assert exception.type is ValueError
 
 
 # if __name__ == "__main__":
