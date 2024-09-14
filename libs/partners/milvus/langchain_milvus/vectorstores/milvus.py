@@ -1514,24 +1514,23 @@ class Milvus(VectorStore):
         if not ranker_type:
             return WeightedRanker(*default_weights)
 
-        match ranker_type:
-            case "weighted":
-                weights = ranker_params.get("weights", default_weights)
-                return WeightedRanker(*weights)
-            case "rrf":
-                k = ranker_params.get("k", None)
-                if k:
-                    return RRFRanker(k)
-                return RRFRanker()
-            case _:
-                logger.error(
-                    "Ranker %s does not exist. "
-                    "Please use on of the following rankers: %s, %s",
-                    ranker_type,
-                    "weighted",
-                    "rrf",
-                )
-                raise ValueError("Unrecognized ranker of type %s", ranker_type)
+        if ranker_type == "weighted":
+            weights = ranker_params.get("weights", default_weights)
+            return WeightedRanker(*weights)
+        elif ranker_type == "rrf":
+            k = ranker_params.get("k", None)
+            if k:
+                return RRFRanker(k)
+            return RRFRanker()
+        else:
+            logger.error(
+                "Ranker %s does not exist. "
+                "Please use on of the following rankers: %s, %s",
+                ranker_type,
+                "weighted",
+                "rrf",
+            )
+            raise ValueError("Unrecognized ranker of type %s", ranker_type)
 
     def _get_vector_fields_as_list(self) -> list[str]:
         return (
