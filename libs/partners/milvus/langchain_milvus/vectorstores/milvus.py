@@ -858,19 +858,15 @@ class Milvus(VectorStore):
                     "The ids will be generated automatically."
                 )
 
-        if not self._is_hybrid:
+        embeddings_functions: List[EmbeddingType] = (
+            self.embeddings if self._is_hybrid else [self.embeddings]
+        )
+        embeddings = []
+        for embedding_func in embeddings_functions:
             try:
-                embeddings = self.embedding_func.embed_documents(texts)
+                embeddings.append(embedding_func.embed_documents(texts))
             except NotImplementedError:
-                embeddings = [self.embedding_func.embed_query(x) for x in texts]
-        else:
-            embeddings = []
-            embeddings_functions: List[EmbeddingType] = self.embedding_func
-            for embedding_func in embeddings_functions:
-                try:
-                    embeddings.append(embedding_func.embed_documents(texts))
-                except NotImplementedError:
-                    embeddings.append([embedding_func.embed_query(x) for x in texts])
+                embeddings.append([embedding_func.embed_query(x) for x in texts])
 
         if len(embeddings) == 0:
             logger.debug("Nothing to insert, skipping.")
@@ -889,15 +885,10 @@ class Milvus(VectorStore):
 
         insert_list: list[dict] = []
 
-        if not self._is_hybrid:
+        for vectors in embeddings:
             assert len(texts) == len(
-                embeddings
+                vectors
             ), "Mismatched lengths of texts and embeddings."
-        else:
-            for vectors in embeddings:
-                assert len(texts) == len(
-                    vectors
-                ), "Mismatched lengths of texts and embeddings."
 
         if metadatas is not None:
             assert len(texts) == len(
@@ -913,7 +904,7 @@ class Milvus(VectorStore):
             entity_dict[self._text_field] = text
 
             if not self._is_hybrid:
-                entity_dict[self._vector_field] = embeddings[i]
+                entity_dict[self._vector_field] = embeddings[0][i]
             else:  # populate each vector field with the matching embeddings
                 for j, embedding in enumerate(embeddings):
                     entity_dict[self._vector_field[j]] = embedding[i]
