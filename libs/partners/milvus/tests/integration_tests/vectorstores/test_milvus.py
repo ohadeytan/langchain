@@ -450,15 +450,26 @@ def test_milvus_multi_vector_with_index_params() -> None:
 def test_milvus_multi_vector_search_with_ranker() -> None:
     """Test hybrid search with specified ranker"""
 
-    # Force the query vector to always be identical to the *first* document
+    index_param_1 = {
+        "metric_type": "L2",
+        "index_type": "HNSW",
+    }
+    index_param_2 = {
+        "metric_type": "L2",
+        "index_type": "HNSW",
+    }
+
+    # Force the query vector to always be identical
+    # to the embeddings of the *first* document
     embedding_1 = FixedValuesEmbeddings(documents_base_val=0.0, query_val=float(0))
-    # Force the query to always be identical to the *last* document
+    # Force the query to always be identical to the embeddings of the *last* document
     embedding_2 = FixedValuesEmbeddings(
         documents_base_val=0.0, query_val=float(len(fake_texts))
     )
     docsearch = Milvus.from_texts(
         embedding=[embedding_1, embedding_2],
         texts=fake_texts,
+        index_params=[index_param_1, index_param_2],
         connection_args={"uri": "./milvus_demo.db"},
         drop_old=True,
     )
