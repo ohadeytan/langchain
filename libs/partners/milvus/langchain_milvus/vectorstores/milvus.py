@@ -1,7 +1,18 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union, cast
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+    cast,
+)
 from uuid import uuid4
 
 import numpy as np
@@ -100,6 +111,7 @@ def maximal_marginal_relevance(
 
 
 EmbeddingType = Union[Embeddings, BaseSparseEmbedding]
+T = TypeVar("T")
 
 
 class Milvus(VectorStore):
@@ -327,7 +339,7 @@ class Milvus(VectorStore):
                 self.embedding_func = cast(List[EmbeddingType], self.embedding_func)
                 if not isinstance(vector_field, list):
                     vector_field = [
-                        f"vector_{i+1}" for i, e in enumerate(self.embedding_func)
+                        f"vector_{i + 1}" for i, e in enumerate(self.embedding_func)
                     ]
                     logger.warning(
                         "When multiple embeddings function are used, one should provide"
@@ -338,8 +350,6 @@ class Milvus(VectorStore):
 
         # In order for compatibility, the vector field needs to be called "vector"
         self._vector_field = vector_field
-        if isinstance(self.embedding_func, list):
-            self._vector_field = cast(List[str], self._vector_field)
 
         if metadata_field:
             logger.warning(
@@ -492,7 +502,7 @@ class Milvus(VectorStore):
         from pymilvus.orm.types import infer_dtype_bydata  # type: ignore
 
         fields = []
-        vector_fields: List[str] = self._get_vector_fields_as_list()
+        vector_fields: List[str] = self._get_as_list(self._vector_field)
         # If enable_dynamic_field, we don't need to create fields, and just pass it.
         # In the future, when metadata_field is deprecated,
         # This logical structure will be simplified like this:
@@ -592,10 +602,8 @@ class Milvus(VectorStore):
                 )
             )
 
-        embeddings_functions: List[EmbeddingType] = (
-            [self.embedding_func]
-            if not isinstance(self.embedding_func, list)
-            else self.embedding_func
+        embeddings_functions: List[EmbeddingType] = self._get_as_list(
+            self.embedding_func
         )
         for i, vectors in enumerate(embeddings):
             dim = len(vectors[0])
@@ -700,22 +708,16 @@ class Milvus(VectorStore):
                     )
 
         if isinstance(self.col, Collection):
-            embeddings_functions: List[EmbeddingType] = (
-                [self.embedding_func]
-                if not isinstance(self.embedding_func, list)
-                else self.embedding_func
+            embeddings_functions: List[EmbeddingType] = self._get_as_list(
+                self.embedding_func
             )
-            vector_fields: List[str] = self._get_vector_fields_as_list()
+            vector_fields: List[str] = self._get_as_list(self._vector_field)
             if self.index_params is None:
                 indexes_params: List[dict] = [
                     {} for _ in range(len(embeddings_functions))
                 ]
             else:
-                indexes_params = (
-                    [self.index_params]
-                    if not isinstance(self.index_params, list)
-                    else self.index_params
-                )
+                indexes_params = self._get_as_list(self.index_params)
 
             for i, embeddings_func in enumerate(embeddings_functions):
                 if isinstance(self.col, Collection) and not self._get_index(
@@ -761,7 +763,7 @@ class Milvus(VectorStore):
         from pymilvus import Collection
 
         if isinstance(self.col, Collection) and not self.search_params:
-            vector_fields: List[str] = self._get_vector_fields_as_list()
+            vector_fields: List[str] = self._get_as_list(self._vector_field)
             search_params_list: List[dict] = []
 
             for vector_field in vector_fields:
@@ -864,11 +866,10 @@ class Milvus(VectorStore):
                     "The ids will be generated automatically."
                 )
 
-        embeddings_functions: List[EmbeddingType] = (
+        embeddings_functions: List[EmbeddingType] = self._get_as_list(
             self.embedding_func
-            if isinstance(self.embedding_func, list)
-            else [self.embedding_func]
         )
+        vector_fields: List[str] = self._get_as_list(self._vector_field)
         embeddings: List = []
         for embedding_func in embeddings_functions:
             try:
@@ -911,11 +912,8 @@ class Milvus(VectorStore):
 
             entity_dict[self._text_field] = text
 
-            if not self._is_hybrid and not isinstance(self._vector_field, list):
-                entity_dict[self._vector_field] = embeddings[0][i]
-            else:  # populate each vector field with the matching embeddings
-                for j, embedding in enumerate(embeddings):
-                    entity_dict[self._vector_field[j]] = embedding[i]
+            for j, embedding in enumerate(embeddings):
+                entity_dict[vector_fields[j]] = embedding[i]
 
             if self._metadata_field and not self.enable_dynamic_field:
                 entity_dict[self._metadata_field] = metadata
@@ -985,11 +983,7 @@ class Milvus(VectorStore):
             logger.debug("No existing collection to search.")
             return None
 
-        if param is None:
-            assert not isinstance(
-                self.search_params, list
-            ), "collection_search is not supported in multi-vector settings"
-            param = self.search_params
+        param = self.search_params  # type: ignore
 
         # Determine result metadata fields with PK.
         if self.enable_dynamic_field:
@@ -1414,7 +1408,7 @@ class Milvus(VectorStore):
         return vector_db
 
     def _parse_document(self, data: dict) -> Document:
-        vector_fields: List[str] = self._get_vector_fields_as_list()
+        vector_fields: List[str] = self._get_as_list(self._vector_field)
         for vector_field in vector_fields:
             if vector_field in data:
                 data.pop(vector_field)
@@ -1519,10 +1513,8 @@ class Milvus(VectorStore):
         ranker_params: dict,
     ) -> Union[WeightedRanker, RRFRanker]:
         """A Ranker factory method"""
-        embeddings_functions: List[EmbeddingType] = (
+        embeddings_functions: List[EmbeddingType] = self._get_as_list(
             self.embedding_func
-            if isinstance(self.embedding_func, list)
-            else [self.embedding_func]
         )
         default_weights = [1.0] * len(embeddings_functions)
         if not ranker_type:
@@ -1552,3 +1544,7 @@ class Milvus(VectorStore):
             if not isinstance(self._vector_field, list)
             else self._vector_field
         )
+
+    @staticmethod
+    def _get_as_list(value: Union[T, List[T]]) -> List[T]:
+        return [value] if not isinstance(value, list) else value
