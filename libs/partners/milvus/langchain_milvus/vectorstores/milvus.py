@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union, cast
 from uuid import uuid4
 
 import numpy as np
@@ -9,7 +9,6 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 from pymilvus import RRFRanker, WeightedRanker
-from pymilvus.client.abstract import BaseRanker
 
 from langchain_milvus import MilvusCollectionHybridSearchRetriever
 from langchain_milvus.utils.sparse import BaseSparseEmbedding
@@ -230,6 +229,7 @@ class Milvus(VectorStore):
             texts = ["a", "b", "c"]
             vector_store = Milvus.from_texts(
                 embedding=[OpenAIEmbeddings(), BM25SparseEmbedding(corpus=texts)],
+                texts=texts,
                 connection_args={"uri": URI},
             )
             vector_store.similarity_search(
@@ -321,27 +321,25 @@ class Milvus(VectorStore):
         self._text_field = text_field
 
         if isinstance(self.embedding_func, list):
-            if len(self.embedding_func) < 2:
-                logger.error(
-                    "At least two embeddings functions"
-                    "are required for multi-vector search."
-                )
-                raise ValueError(
-                    "Multi-vector search requires at least two embeddings functions."
-                )
-            if not isinstance(vector_field, list):
-                vector_field = [
-                    f"vector_{i+1}_{e.__class__.__name__}"
-                    for i, e in enumerate(self.embedding_func)
-                ]
-                logger.warning(
-                    "When multiple embeddings function are used, one should provide"
-                    "matching `vector_field` names. Using generated vector names %s",
-                    vector_field,
-                )
+            if len(self.embedding_func) == 1:
+                self.embedding_func = self.embedding_func[0]
+            else:
+                self.embedding_func = cast(List[EmbeddingType], self.embedding_func)
+                if not isinstance(vector_field, list):
+                    vector_field = [
+                        f"vector_{i+1}" for i, e in enumerate(self.embedding_func)
+                    ]
+                    logger.warning(
+                        "When multiple embeddings function are used, one should provide"
+                        "matching `vector_field` names. "
+                        "Using generated vector names %s",
+                        vector_field,
+                    )
 
         # In order for compatibility, the vector field needs to be called "vector"
         self._vector_field = vector_field
+        if isinstance(self.embedding_func, list):
+            self._vector_field = cast(List[str], self._vector_field)
 
         if metadata_field:
             logger.warning(
@@ -458,7 +456,7 @@ class Milvus(VectorStore):
 
     @property
     def _is_hybrid(self) -> bool:
-        return isinstance(self.embeddings, list)
+        return isinstance(self.embedding_func, list)
 
     def _init(
         self,
@@ -595,7 +593,9 @@ class Milvus(VectorStore):
             )
 
         embeddings_functions: List[EmbeddingType] = (
-            [self.embeddings] if not self._is_hybrid else self.embeddings
+            [self.embedding_func]
+            if not isinstance(self.embedding_func, list)
+            else self.embedding_func
         )
         for i, vectors in enumerate(embeddings):
             dim = len(vectors[0])
@@ -678,37 +678,43 @@ class Milvus(VectorStore):
         def create_index_helper(
             vector_field: str, index_params: Optional[dict]
         ) -> None:
-            try:
-                self.col.create_index(
-                    vector_field,
-                    index_params=index_params,
-                    using=self.alias,
-                )
-            except MilvusException:
-                # Use AUTOINDEX if default index creation fails (e.g., on Zilliz Cloud)
-                index_params = {
-                    "metric_type": "L2",
-                    "index_type": "AUTOINDEX",
-                    "params": {},
-                }
-                self.col.create_index(
-                    vector_field,
-                    index_params=index_params,
-                    using=self.alias,
-                )
+            if self.col:
+                try:
+                    self.col.create_index(
+                        vector_field,
+                        index_params=index_params,
+                        using=self.alias,
+                    )
+                except MilvusException:
+                    # Use AUTOINDEX if default index creation fails
+                    # (e.g., on Zilliz Cloud)
+                    index_params = {
+                        "metric_type": "L2",
+                        "index_type": "AUTOINDEX",
+                        "params": {},
+                    }
+                    self.col.create_index(
+                        vector_field,
+                        index_params=index_params,
+                        using=self.alias,
+                    )
 
         if isinstance(self.col, Collection):
             embeddings_functions: List[EmbeddingType] = (
-                [self.embeddings] if not self._is_hybrid else self.embeddings
+                [self.embedding_func]
+                if not isinstance(self.embedding_func, list)
+                else self.embedding_func
             )
             vector_fields: List[str] = self._get_vector_fields_as_list()
             if self.index_params is None:
-                indexes_params: List[Optional[dict]] = [
-                    None for _ in range(len(embeddings_functions))
+                indexes_params: List[dict] = [
+                    {} for _ in range(len(embeddings_functions))
                 ]
             else:
                 indexes_params = (
-                    [self.index_params] if not self._is_hybrid else self.index_params
+                    [self.index_params]
+                    if not isinstance(self.index_params, list)
+                    else self.index_params
                 )
 
             for i, embeddings_func in enumerate(embeddings_functions):
@@ -717,7 +723,7 @@ class Milvus(VectorStore):
                 ):
                     try:
                         # If no index params, use a default HNSW based one
-                        if indexes_params[i] is None:
+                        if not indexes_params[i]:
                             if self._is_sparse_embedding(embeddings_func):
                                 indexes_params[i] = {
                                     "metric_type": "IP",
@@ -743,7 +749,7 @@ class Milvus(VectorStore):
                             self.collection_name,
                         )
                         raise e
-            if not self._is_hybrid:
+            if self._is_hybrid:
                 self.index_params = indexes_params
             else:
                 self.index_params = indexes_params[0]
@@ -859,9 +865,11 @@ class Milvus(VectorStore):
                 )
 
         embeddings_functions: List[EmbeddingType] = (
-            self.embeddings if self._is_hybrid else [self.embeddings]
+            self.embedding_func
+            if isinstance(self.embedding_func, list)
+            else [self.embedding_func]
         )
-        embeddings = []
+        embeddings: List = []
         for embedding_func in embeddings_functions:
             try:
                 embeddings.append(embedding_func.embed_documents(texts))
@@ -903,7 +911,7 @@ class Milvus(VectorStore):
 
             entity_dict[self._text_field] = text
 
-            if not self._is_hybrid:
+            if not self._is_hybrid and not isinstance(self._vector_field, list):
                 entity_dict[self._vector_field] = embeddings[0][i]
             else:  # populate each vector field with the matching embeddings
                 for j, embedding in enumerate(embeddings):
@@ -978,12 +986,15 @@ class Milvus(VectorStore):
             return None
 
         if param is None:
+            assert not isinstance(
+                self.search_params, list
+            ), "collection_search is not supported in multi-vector settings"
             param = self.search_params
 
         # Determine result metadata fields with PK.
         if self.enable_dynamic_field:
             output_fields = ["*"]
-        else:
+        elif not isinstance(self._vector_field, list):
             output_fields = self.fields[:]
             output_fields.remove(self._vector_field)
         timeout = self.timeout or timeout
@@ -1005,7 +1016,7 @@ class Milvus(VectorStore):
         query: str,
         k: int = 4,
         param: Optional[Union[List[dict], dict]] = None,
-        expr: Optional[Union[List[str]], str] = None,
+        expr: Union[List[str], Optional[str]] = None,
         timeout: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Document]:
@@ -1074,7 +1085,7 @@ class Milvus(VectorStore):
         query: str,
         k: int = 4,
         param: Optional[Union[List[dict], dict]] = None,
-        expr: Optional[Union[List[str]], str] = None,
+        expr: Union[List[str], Optional[str]] = None,
         timeout: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Tuple[Document, float]]:
@@ -1107,7 +1118,7 @@ class Milvus(VectorStore):
         # Embed the query text.
         timeout = self.timeout or timeout
 
-        if self._is_hybrid:
+        if isinstance(self.embedding_func, list):
             ranker = self._create_ranker(
                 kwargs.pop("ranker_type", None), kwargs.pop("ranker_params", {})
             )
@@ -1131,6 +1142,10 @@ class Milvus(VectorStore):
                 res.append((doc, result.score))
         else:
             embedding = self.embedding_func.embed_query(query)
+            assert not isinstance(expr, list) and not isinstance(param, list), (
+                "For a single embedding function, "
+                "one cannot provide multiple `expr` and `param`"
+            )
             res = self.similarity_search_with_score_by_vector(
                 embedding=embedding,
                 k=k,
@@ -1221,6 +1236,9 @@ class Milvus(VectorStore):
             logger.debug("No existing collection to search.")
             return []
 
+        assert not isinstance(
+            self.embedding_func, list
+        ), "MMR is not-suported in multi-vector settings"
         embedding = self.embedding_func.embed_query(query)
         timeout = self.timeout or timeout
         return self.max_marginal_relevance_search_by_vector(
@@ -1499,10 +1517,12 @@ class Milvus(VectorStore):
         self,
         ranker_type: Optional[Literal["rrf", "weighted"]],
         ranker_params: dict,
-    ) -> BaseRanker:
+    ) -> Union[WeightedRanker, RRFRanker]:
         """A Ranker factory method"""
         embeddings_functions: List[EmbeddingType] = (
-            self.embeddings if self._is_hybrid else [self.embeddings]
+            self.embedding_func
+            if isinstance(self.embedding_func, list)
+            else [self.embedding_func]
         )
         default_weights = [1.0] * len(embeddings_functions)
         if not ranker_type:

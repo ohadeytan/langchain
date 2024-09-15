@@ -430,6 +430,12 @@ def test_milvus_multi_vector_with_index_params() -> None:
         drop_old=True,
     )
 
+    assert docsearch.col is not None
+    assert isinstance(docsearch.index_params, list) and len(docsearch.index_params) == 2
+    assert (
+        isinstance(docsearch.search_params, list) and len(docsearch.search_params) == 2
+    )
+
     index_1 = docsearch.col.indexes[0]
     assert index_1.field_name == "vec_field_1"
     assert index_1.params["metric_type"] == "COSINE"
@@ -475,17 +481,6 @@ def test_milvus_multi_vector_search_with_ranker() -> None:
     assert_docs_equal_without_pk(output, [Document(page_content=fake_texts[-1])])
 
 
-def test_milvus_multi_vector_with_single_embeddings_raises_exception() -> None:
-    with pytest.raises(ValueError) as exception:
-        _ = Milvus.from_texts(
-            embedding=[FakeEmbeddings()],
-            texts=fake_texts,
-            connection_args={"uri": "./milvus_demo.db"},
-            drop_old=True,
-        )
-    assert exception.type is ValueError
-
-
 # if __name__ == "__main__":
 #     test_milvus()
 #     test_milvus_vector_search()
@@ -508,4 +503,3 @@ def test_milvus_multi_vector_with_single_embeddings_raises_exception() -> None:
 #     test_milvus_multi_vector_embeddings()
 #     test_milvus_multi_vector_with_index_params()
 #     test_milvus_multi_vector_search_with_ranker()
-#     test_milvus_multi_vector_with_single_embeddings_raises_exception()
