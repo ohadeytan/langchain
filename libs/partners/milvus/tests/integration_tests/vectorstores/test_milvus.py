@@ -9,6 +9,7 @@ from langchain_milvus.utils.sparse import BM25SparseEmbedding
 from langchain_milvus.vectorstores import Milvus
 from tests.integration_tests.utils import (
     FakeEmbeddings,
+    FixedValuesEmbeddings,
     assert_docs_equal_without_pk,
     fake_texts,
 )
@@ -442,22 +443,10 @@ def test_milvus_multi_vector_with_index_params() -> None:
 
 def test_milvus_multi_vector_search_with_ranker() -> None:
     """Test hybrid search with specified ranker"""
-    from langchain_core.embeddings import Embeddings
 
-    class FixedValuesEmbeddings(Embeddings):
-        def __init__(self, *, documents_base_val: float = 1.0, query_val: float = 1.0):
-            self.documents_val = documents_base_val
-            self.query_val = query_val
-
-        def embed_documents(self, texts: List[str]) -> List[List[float]]:
-            return [[self.documents_val + i] * 10 for i in range(len(texts))]
-
-        def embed_query(self, text: str) -> List[float]:
-            return [float(self.query_val)] * 10
-
-    # Force the query vector to always be identical to the first document
+    # Force the query vector to always be identical to the *first* document
     embedding_1 = FixedValuesEmbeddings(documents_base_val=0.0, query_val=float(0))
-    # Force the query to always be identical to the last document
+    # Force the query to always be identical to the *last* document
     embedding_2 = FixedValuesEmbeddings(
         documents_base_val=0.0, query_val=float(len(fake_texts))
     )
@@ -472,7 +461,7 @@ def test_milvus_multi_vector_search_with_ranker() -> None:
     output = docsearch.similarity_search(
         query=query,
         ranker_type="weighted",
-        ranker_params={"weights": [1.0, 0.0]},
+        ranker_params={"weights": [1.0, 0.0]},  # Count for first embeddings only
         k=1,
     )
     assert_docs_equal_without_pk(output, [Document(page_content=fake_texts[0])])
@@ -480,7 +469,7 @@ def test_milvus_multi_vector_search_with_ranker() -> None:
     output = docsearch.similarity_search(
         query=query,
         ranker_type="weighted",
-        ranker_params={"weights": [0.0, 1.0]},
+        ranker_params={"weights": [0.0, 1.0]},  # Count for second embeddings only
         k=1,
     )
     assert_docs_equal_without_pk(output, [Document(page_content=fake_texts[-1])])
@@ -519,3 +508,4 @@ def test_milvus_multi_vector_with_single_embeddings_raises_exception() -> None:
 #     test_milvus_multi_vector_embeddings()
 #     test_milvus_multi_vector_with_index_params()
 #     test_milvus_multi_vector_search_with_ranker()
+#     test_milvus_multi_vector_with_single_embeddings_raises_exception()
