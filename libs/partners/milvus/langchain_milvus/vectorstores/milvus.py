@@ -323,10 +323,11 @@ class Milvus(VectorStore):
         if isinstance(self.embedding_func, list):
             if len(self.embedding_func) < 2:
                 logger.error(
-                    "At least two embeddings functions are required for multi-vector search."
+                    "At least two embeddings functions"
+                    "are required for multi-vector search."
                 )
                 raise ValueError(
-                    f"Multi-vector search requires at least two embeddings functions."
+                    "Multi-vector search requires at least two embeddings functions."
                 )
             if not isinstance(vector_field, list):
                 vector_field = [
@@ -596,7 +597,6 @@ class Milvus(VectorStore):
         embeddings_functions: List[EmbeddingType] = (
             [self.embeddings] if not self._is_hybrid else self.embeddings
         )
-        embeddings: List[list] = [embeddings] if not self._is_hybrid else embeddings
         for i, vectors in enumerate(embeddings):
             dim = len(vectors[0])
             # Create the vector field, supports binary or float vectors
@@ -676,7 +676,7 @@ class Milvus(VectorStore):
         from pymilvus import Collection, MilvusException
 
         def create_index_helper(
-            vector_field: str, index_params: dict[str, Any]
+            vector_field: str, index_params: Optional[dict]
         ) -> None:
             try:
                 self.col.create_index(
@@ -707,7 +707,7 @@ class Milvus(VectorStore):
                     None for _ in range(len(embeddings_functions))
                 ]
             else:
-                indexes_params: List[Optional[dict]] = (
+                indexes_params = (
                     [self.index_params] if not self._is_hybrid else self.index_params
                 )
 
@@ -760,11 +760,14 @@ class Milvus(VectorStore):
 
             for vector_field in vector_fields:
                 index = self._get_index(field_name=vector_field)
-                index_type: str = index["index_param"]["index_type"]
-                metric_type: str = index["index_param"]["metric_type"]
-                search_params = copy.deepcopy(self.default_search_params[index_type])
-                search_params["metric_type"] = metric_type
-                search_params_list.append(search_params)
+                if index is not None:
+                    index_type: str = index["index_param"]["index_type"]
+                    metric_type: str = index["index_param"]["metric_type"]
+                    search_params = copy.deepcopy(
+                        self.default_search_params[index_type]
+                    )
+                    search_params["metric_type"] = metric_type
+                    search_params_list.append(search_params)
 
             if self._is_hybrid:
                 self.search_params = search_params_list
