@@ -863,11 +863,17 @@ class Milvus(VectorStore):
         )
         vector_fields: List[str] = self._get_as_list(self._vector_field)
         embeddings: List = []
+
         for embedding_func in embeddings_functions:
             try:
                 embeddings.append(embedding_func.embed_documents(texts))
             except NotImplementedError:
                 embeddings.append([embedding_func.embed_query(x) for x in texts])
+        # assuming [f1, f2] embeddings functions and [a, b, c] as texts:
+        # embeddings = [
+        #     [f1(a), f1(b), f1(c)],
+        #     [f2(a), f2(b), f2(c)]
+        # ]
 
         if len(embeddings) == 0:
             logger.debug("Nothing to insert, skipping.")
@@ -886,9 +892,9 @@ class Milvus(VectorStore):
 
         insert_list: list[dict] = []
 
-        for vectors in embeddings:
+        for vector_field_embeddings in embeddings:
             assert len(texts) == len(
-                vectors
+                vector_field_embeddings
             ), "Mismatched lengths of texts and embeddings."
 
         if metadatas is not None:
@@ -904,8 +910,8 @@ class Milvus(VectorStore):
 
             entity_dict[self._text_field] = text
 
-            for j, embedding in enumerate(embeddings):
-                entity_dict[vector_fields[j]] = embedding[i]
+            for vector_field, vector_field_embeddings in zip(vector_fields, embeddings):
+                entity_dict[vector_field] = vector_field_embeddings[i]
 
             if self._metadata_field and not self.enable_dynamic_field:
                 entity_dict[self._metadata_field] = metadata
