@@ -605,18 +605,18 @@ class Milvus(VectorStore):
         embeddings_functions: List[EmbeddingType] = self._get_as_list(
             self.embedding_func
         )
-        for i, vectors in enumerate(embeddings):
-            dim = len(vectors[0])
+        for vector_field, embedding_func, vector_field_embeddings in zip(
+            vector_fields, embeddings_functions, embeddings
+        ):
+            dim = len(vector_field_embeddings[0])
             # Create the vector field, supports binary or float vectors
-            if self._is_sparse_embedding(embeddings_function=embeddings_functions[i]):
-                fields.append(
-                    FieldSchema(vector_fields[i], DataType.SPARSE_FLOAT_VECTOR)
-                )
+            if self._is_sparse_embedding(embeddings_function=embedding_func):
+                fields.append(FieldSchema(vector_field, DataType.SPARSE_FLOAT_VECTOR))
             else:
                 fields.append(
                     FieldSchema(
-                        vector_fields[i],
-                        infer_dtype_bydata(vectors[0]),
+                        vector_field,
+                        infer_dtype_bydata(vector_field_embeddings[0]),
                         dim=dim,
                     )
                 )
