@@ -470,7 +470,7 @@ class Milvus(VectorStore):
 
     def _init(
         self,
-        embeddings: Optional[Union[list, List[list]]] = None,
+        embeddings: Optional[List[list]] = None,
         metadatas: Optional[list[dict]] = None,
         partition_names: Optional[list] = None,
         replica_number: int = 1,
@@ -489,7 +489,7 @@ class Milvus(VectorStore):
 
     def _create_collection(
         self,
-        embeddings: Union[list, List[list]],
+        embeddings: List[list],
         metadatas: Optional[list[dict]] = None,
     ) -> None:
         from pymilvus import (
