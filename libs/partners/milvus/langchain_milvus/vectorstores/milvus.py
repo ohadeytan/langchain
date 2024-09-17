@@ -1110,7 +1110,7 @@ class Milvus(VectorStore):
         # Embed the query text.
         timeout = self.timeout or timeout
 
-        if isinstance(self.embedding_func, list):
+        if isinstance(self.embedding_func, list):  # is hybrid
             ranker = self._create_ranker(
                 kwargs.pop("ranker_type", None), kwargs.pop("ranker_params", {})
             )
