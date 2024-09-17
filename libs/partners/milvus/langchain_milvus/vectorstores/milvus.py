@@ -683,30 +683,6 @@ class Milvus(VectorStore):
         """Create an index on the collection"""
         from pymilvus import Collection, MilvusException
 
-        def create_index_helper(
-            vector_field: str, index_params: Optional[dict]
-        ) -> None:
-            if self.col:
-                try:
-                    self.col.create_index(
-                        vector_field,
-                        index_params=index_params,
-                        using=self.alias,
-                    )
-                except MilvusException:
-                    # Use AUTOINDEX if default index creation fails
-                    # (e.g., on Zilliz Cloud)
-                    index_params = {
-                        "metric_type": "L2",
-                        "index_type": "AUTOINDEX",
-                        "params": {},
-                    }
-                    self.col.create_index(
-                        vector_field,
-                        index_params=index_params,
-                        using=self.alias,
-                    )
-
         if isinstance(self.col, Collection):
             embeddings_functions: List[EmbeddingType] = self._get_as_list(
                 self.embedding_func
@@ -720,9 +696,7 @@ class Milvus(VectorStore):
                 indexes_params = self._get_as_list(self.index_params)
 
             for i, embeddings_func in enumerate(embeddings_functions):
-                if isinstance(self.col, Collection) and not self._get_index(
-                    vector_fields[i]
-                ):
+                if not self._get_index(vector_fields[i]):
                     try:
                         # If no index params, use a default HNSW based one
                         if not indexes_params[i]:
@@ -738,7 +712,25 @@ class Milvus(VectorStore):
                                     "index_type": "HNSW",
                                     "params": {"M": 8, "efConstruction": 64},
                                 }
-                        create_index_helper(vector_fields[i], indexes_params[i])
+                        try:
+                            self.col.create_index(
+                                vector_fields[i],
+                                index_params=indexes_params[i],
+                                using=self.alias,
+                            )
+                        except MilvusException:
+                            # Use AUTOINDEX if default index creation fails
+                            # (e.g., on Zilliz Cloud)
+                            index_params = {
+                                "metric_type": "L2",
+                                "index_type": "AUTOINDEX",
+                                "params": {},
+                            }
+                            self.col.create_index(
+                                vector_fields[i],
+                                index_params=index_params,
+                                using=self.alias,
+                            )
                         logger.debug(
                             "Successfully created an index"
                             "on %s field on collection: %s",
